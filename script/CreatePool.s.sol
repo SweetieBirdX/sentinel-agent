@@ -40,10 +40,11 @@ contract CreatePool is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Define pool key
+        // Define pool key (currency0 must be smaller address)
+        // USDC (0x1c7D...) < WETH (0x7b79...) so USDC is currency0
         PoolKey memory poolKey = PoolKey({
-            currency0: Currency.wrap(WETH),
-            currency1: Currency.wrap(USDC),
+            currency0: Currency.wrap(USDC),
+            currency1: Currency.wrap(WETH),
             fee: 3000, // 0.3% (dynamic via hook)
             tickSpacing: 60,
             hooks: IHooks(hookAddress)

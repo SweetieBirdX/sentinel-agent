@@ -11,6 +11,7 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/src/types/BeforeS
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
+import {IAgentRegistry} from "./interfaces/IAgentRegistry.sol";
 
 /// @title SentinelHook
 /// @notice Autonomous liquidity manager with AI agent integration for LVR mitigation
@@ -227,11 +228,21 @@ contract SentinelHook is BaseHook {
                           INTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Verify agent via registry or signature
+    /// @notice Verify agent via registry
+    /// @param agent Agent address
+    /// @param signature Agent's signature (unused in simple check, reserved for future)
+    /// @return True if agent is authorized
     function _verifyAgent(address agent, bytes memory signature) internal view returns (bool) {
-        // For now, simplified verification
-        // Will integrate with AgentRegistry in next prompt
-        return signature.length > 0; // Placeholder
+        // Quick check: Is agent pre-authorized?
+        if (authorizedAgents[agent]) return true;
+        
+        // Check with registry
+        if (agentRegistry == address(0)) return false;
+        
+        IAgentRegistry registry = IAgentRegistry(agentRegistry);
+        
+        // Simple check: Is agent active and has good reputation?
+        return registry.isAuthorized(agent);
     }
 
     /// @notice Clamp fee to valid bounds

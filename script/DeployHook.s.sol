@@ -8,7 +8,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 
 /// @title DeployHook
-/// @notice Deploys Sentinel Agent system to Sepolia
+/// @notice Deploys SentinelHook using existing AgentRegistry
 contract DeployHook is Script {
     uint160 constant REQUIRED_FLAGS =
         uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG);
@@ -17,6 +17,7 @@ contract DeployHook is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address poolManager = vm.envAddress("POOL_MANAGER_ADDRESS");
         address adminAgent = vm.envAddress("ADMIN_AGENT_ADDRESS");
+        address registryAddress = vm.envAddress("AGENT_REGISTRY_ADDRESS");
 
         console2.log("========================================");
         console2.log("SENTINEL AGENT - DEPLOYMENT SCRIPT");
@@ -25,14 +26,13 @@ contract DeployHook is Script {
         console2.log("Deployer:", vm.addr(deployerPrivateKey));
         console2.log("PoolManager:", poolManager);
         console2.log("Admin Agent:", adminAgent);
+        console2.log("AgentRegistry:", registryAddress);
         console2.log("");
 
-        vm.startBroadcast(deployerPrivateKey);
-
-        // 1. Deploy AgentRegistry
-        console2.log("Step 1: Deploying AgentRegistry...");
-        AgentRegistry registry = new AgentRegistry();
-        console2.log("AgentRegistry deployed at:", address(registry));
+        // 1. Use existing AgentRegistry
+        console2.log("Step 1: Using existing AgentRegistry...");
+        AgentRegistry registry = AgentRegistry(registryAddress);
+        console2.log("AgentRegistry at:", address(registry));
         console2.log("");
 
         // 2. Read mined salt
@@ -41,6 +41,8 @@ contract DeployHook is Script {
         uint256 salt = vm.parseUint(saltStr);
         console2.log("Using salt:", salt);
         console2.log("");
+
+        vm.startBroadcast(deployerPrivateKey);
 
         // 3. Deploy SentinelHook with CREATE2
         console2.log("Step 3: Deploying SentinelHook...");
@@ -53,27 +55,35 @@ contract DeployHook is Script {
         uint160 addressFlags = uint160(address(hook)) & 0xFFFF;
         console2.log("Address flags:", addressFlags);
         console2.log("Required flags:", REQUIRED_FLAGS);
-        require(addressFlags >= REQUIRED_FLAGS, "Invalid hook address flags");
-        console2.log("Flags verified!");
+
+        // Check each individual flag
+        bool hasBeforeSwap = (uint160(address(hook)) & Hooks.BEFORE_SWAP_FLAG) != 0;
+        bool hasAfterSwap = (uint160(address(hook)) & Hooks.AFTER_SWAP_FLAG) != 0;
+        bool hasBeforeAddLiquidity = (uint160(address(hook)) & Hooks.BEFORE_ADD_LIQUIDITY_FLAG) != 0;
+
+        require(hasBeforeSwap, "Missing BEFORE_SWAP_FLAG");
+        require(hasAfterSwap, "Missing AFTER_SWAP_FLAG");
+        require(hasBeforeAddLiquidity, "Missing BEFORE_ADD_LIQUIDITY_FLAG");
+        console2.log("All flags verified!");
         console2.log("");
 
         // 5. Register admin agent
         console2.log("Step 5: Registering admin agent...");
-        registry.registerAgent(adminAgent, "Admin Agent", "Primary administrative agent for Sentinel system");
+        registry.registerAgent(adminAgent, "Admin Agent", "Primary administrative agent");
         console2.log("Admin agent registered:", adminAgent);
         console2.log("");
 
         // 6. Authorize admin agent in hook
         console2.log("Step 6: Authorizing admin agent in hook...");
         hook.authorizeAgent(adminAgent);
-        console2.log("Admin agent authorized in hook");
+        console2.log("Admin agent authorized");
         console2.log("");
+
+        vm.stopBroadcast();
 
         // 7. Save deployment info
         console2.log("Step 7: Saving deployment addresses...");
         _saveDeployment(address(registry), address(hook), poolManager);
-
-        vm.stopBroadcast();
 
         console2.log("");
         console2.log("========================================");
@@ -84,11 +94,6 @@ contract DeployHook is Script {
         console2.log("PoolManager:", poolManager);
         console2.log("");
         console2.log("Deployment info saved to: deployments/sepolia.json");
-        console2.log("");
-        console2.log("Next steps:");
-        console2.log("1. Verify contracts on Etherscan");
-        console2.log("2. Create test pool with hook");
-        console2.log("3. Start agent system (Day 2)");
         console2.log("========================================");
     }
 
@@ -112,14 +117,6 @@ contract DeployHook is Script {
             )
         );
 
-        // Create deployments directory if it doesn't exist
-        string[] memory inputs = new string[](3);
-        inputs[0] = "mkdir";
-        inputs[1] = "-p";
-        inputs[2] = "deployments";
-        vm.ffi(inputs);
-
-        // Write deployment file
         vm.writeFile("deployments/sepolia.json", json);
     }
 }

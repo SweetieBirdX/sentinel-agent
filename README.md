@@ -29,4 +29,14 @@ forge script script/Anvil.s.sol --rpc-url http://localhost:8545 --broadcast
 - Phala Network (TEE)
 - Brevis (ZK-ML)
 
-[Rest of README will be completed as we build]
+## 🚀 Deployed Contracts (Sepolia Testnet)
+
+### Contract Addresses
+- **AgentRegistry**: `0x7a6aC7FE20523A0A7E17B1734D1f87F8E30fF499`
+  - [View on Etherscan](https://sepolia.etherscan.io/address/0x7a6aC7FE20523A0A7E17B1734D1f87F8E30fF499)
+- **SentinelHook**: `0x6379a715CfeE610248a38cdCebE9b7fd753308c0`
+  - [View on Etherscan](https://sepolia.etherscan.io/address/0x6379a715CfeE610248a38cdCebE9b7fd753308c0)
+- **PoolManager**: `0x8C4BcBE6b9eF47855f97E675296FA3F6fafa5F1A` (Official Uniswap)
+
+---
+*Built for ETHGlobal Hackathon - Uniswap Foundation Track*

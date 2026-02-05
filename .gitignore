@@ -16,3 +16,8 @@ docs/
 
 # Node modules
 node_modules/
+
+# User additions
+broadcast/
+salt.txt
+deployments/

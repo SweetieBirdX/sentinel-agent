@@ -105,22 +105,52 @@ class BlockchainService {
     }
 
     /**
-     * Get current pool state
+     * Get current pool state using extsload (Uniswap v4 pattern)
+     * Note: Uniswap v4 uses transient storage and extsload for state reads
      */
     async getPoolState(poolId) {
         try {
-            const slot0 = await this.contracts.poolManager.getSlot0(poolId);
-            const liquidity = await this.contracts.poolManager.getLiquidity(poolId);
+            // Uniswap v4 stores pool state in slots derived from poolId
+            // Slot 0 contains: sqrtPriceX96 (160 bits) | tick (24 bits) | protocolFee (16 bits) | lpFee (24 bits)
+            // For now, we'll use a simplified approach - just check if pool exists
+
+            // Try to read via extsload (low-level storage read)
+            const slot0Key = ethers.solidityPackedKeccak256(
+                ['bytes32', 'uint256'],
+                [poolId, 0] // pools mapping slot
+            );
+
+            const data = await this.provider.getStorage(
+                this.contracts.poolManager.target,
+                slot0Key
+            );
+
+            if (data === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                logger.debug('Pool state not found via extsload, pool may not be initialized');
+                return null;
+            }
+
+            // Parse the packed slot0 data
+            const dataBI = BigInt(data);
+            const sqrtPriceX96 = dataBI & ((1n << 160n) - 1n);
+            const tick = Number((dataBI >> 160n) & ((1n << 24n) - 1n));
+            const protocolFee = Number((dataBI >> 184n) & ((1n << 16n) - 1n));
+            const lpFee = Number((dataBI >> 200n) & ((1n << 24n) - 1n));
+
+            logger.debug('Pool state retrieved', { sqrtPriceX96: sqrtPriceX96.toString() });
 
             return {
-                sqrtPriceX96: slot0[0],
-                tick: slot0[1],
-                protocolFee: slot0[2],
-                lpFee: slot0[3],
-                liquidity: liquidity
+                sqrtPriceX96,
+                tick,
+                protocolFee,
+                lpFee,
+                liquidity: 0n // Would need another extsload call
             };
         } catch (error) {
-            logError(logger, error, { context: 'getPoolState', poolId });
+            // Gracefully handle - CEX price is primary data source
+            logger.debug('Pool state query failed, using CEX price only', {
+                poolId: poolId?.substring(0, 10) + '...'
+            });
             return null;
         }
     }

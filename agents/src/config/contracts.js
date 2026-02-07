@@ -51,7 +51,7 @@ function validateAddresses() {
         }
     }
 
-    console.log('✅ All contract addresses validated');
+    // Validation successful - addresses are valid
     return addresses;
 }
 

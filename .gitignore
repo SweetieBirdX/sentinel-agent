@@ -11,13 +11,25 @@ out/
 # Docs
 docs/
 
-# Dotenv file
+# Dotenv files
 .env
+.env.local
+.env.*.local
+agents/.env
 
 # Node modules
 node_modules/
+agents/node_modules/
 
 # User additions
 broadcast/
 salt.txt
 deployments/
+
+# Logs
+*.log
+agents/logs/*.log
+agents/test-agent.log
+
+# Test artifacts
+agents/test-agent.log

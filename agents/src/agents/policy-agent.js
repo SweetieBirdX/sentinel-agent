@@ -39,7 +39,8 @@ class PolicyAgent extends EventEmitter {
         });
 
         try {
-            const { recommendedFee, volatility, spread, confidence } = recommendation;
+            const { recommendedFee, volatility, spread, confidence, attestation } = recommendation;
+            this.currentAttestation = attestation; // Store for forwarding
 
             // Apply decision rules
             const decision = this.applyDecisionRules({
@@ -180,7 +181,8 @@ class PolicyAgent extends EventEmitter {
             deadline,
             signature,
             signer: blockchainService.wallet.address,
-            messageHash
+            messageHash,
+            attestation: this.currentAttestation // Forward the attestation
         };
     }
 

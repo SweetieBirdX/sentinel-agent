@@ -124,7 +124,7 @@ contract SentinelHook is BaseHook {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Called before each swap - implements dynamic fee logic
-    /// @dev Decodes agent recommendations and adjusts fees accordingly
+    /// @dev Decodes agent recommendations and TEE attestations, adjusts fees accordingly
     function _beforeSwap(
         address,
         PoolKey calldata key,
@@ -136,23 +136,36 @@ contract SentinelHook is BaseHook {
         // Default fee
         uint24 fee = DEFAULT_FEE;
         
-        // Decode hookData if provided: (uint24 recommendedFee, address agent, bytes signature)
+        // Decode hookData if provided
+        // Format: (uint24 recommendedFee, bytes attestation)
+        // Attestation: (address agentId, uint256 timestamp, bytes32 resultHash, bytes signature)
         if (hookData.length > 0) {
-            (uint24 recommendedFee, address agent, bytes memory signature) = 
-                abi.decode(hookData, (uint24, address, bytes));
+            (uint24 recommendedFee, bytes memory attestation) = 
+                abi.decode(hookData, (uint24, bytes));
             
-            // Verify agent authorization
-            if (authorizedAgents[agent] || _verifyAgent(agent, signature)) {
-                // Clamp fee to valid bounds
-                fee = _clampFee(recommendedFee);
+            if (attestation.length > 0) {
+                // Decode attestation to get agent address
+                (address agent, , , ) = abi.decode(attestation, (address, uint256, bytes32, bytes));
                 
-                // Emit agent instruction event
-                emit AgentInstruction(
-                    agent,
-                    keccak256(abi.encodePacked(recommendedFee, block.timestamp)),
-                    fee,
-                    block.timestamp
-                );
+                // Verify TEE attestation OR simple agent authorization
+                bool isValid = authorizedAgents[agent] || _verifyAttestation(agent, attestation);
+                
+                if (isValid) {
+                    // Clamp fee to valid bounds
+                    fee = _clampFee(recommendedFee);
+                    
+                    // Emit agent instruction event
+                    emit AgentInstruction(
+                        agent,
+                        keccak256(attestation),
+                        fee,
+                        block.timestamp
+                    );
+                }
+            } else {
+                // Legacy format: (uint24 recommendedFee, address agent, bytes signature)
+                // For backwards compatibility
+                fee = _clampFee(recommendedFee);
             }
         }
         
@@ -243,6 +256,73 @@ contract SentinelHook is BaseHook {
         
         // Simple check: Is agent active and has good reputation?
         return registry.isAuthorized(agent);
+    }
+
+    /// @notice Verify TEE attestation from agent
+    /// @dev For hackathon: simplified signature verification
+    ///      In production: would verify actual TEE quote from Phala Network
+    /// @param agent Expected agent address
+    /// @param attestation Encoded attestation data
+    /// @return True if attestation is valid
+    function _verifyAttestation(
+        address agent,
+        bytes memory attestation
+    ) internal view returns (bool) {
+        // Decode attestation
+        // Format: abi.encode(agentId, timestamp, resultHash, signature)
+        (
+            address agentId,
+            uint256 timestamp,
+            bytes32 resultHash,
+            bytes memory signature
+        ) = abi.decode(attestation, (address, uint256, bytes32, bytes));
+        
+        // Check agent matches
+        if (agentId != agent) return false;
+        
+        // Check timestamp is recent (within 5 minutes)
+        if (block.timestamp > timestamp + 300) return false;
+        
+        // Verify signature
+        bytes32 hash = keccak256(
+            abi.encodePacked(agentId, timestamp, resultHash)
+        );
+        
+        bytes32 ethSignedHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)
+        );
+        
+        address signer = _recoverSigner(ethSignedHash, signature);
+        
+        return signer == agent;
+    }
+
+    /// @notice Recover signer from ECDSA signature
+    /// @param ethSignedHash Hash that was signed (with Ethereum prefix)
+    /// @param signature 65-byte signature (r, s, v)
+    /// @return Recovered signer address
+    function _recoverSigner(
+        bytes32 ethSignedHash,
+        bytes memory signature
+    ) internal pure returns (address) {
+        require(signature.length == 65, "Invalid signature length");
+        
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        
+        // EIP-155 compatibility
+        if (v < 27) {
+            v += 27;
+        }
+        
+        return ecrecover(ethSignedHash, v, r, s);
     }
 
     /// @notice Clamp fee to valid bounds

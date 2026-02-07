@@ -1,6 +1,8 @@
 const EventEmitter = require('events');
 const blockchainService = require('../services/blockchain');
 const priceFetcher = require('../services/price-fetcher');
+const phalaService = require('../services/phala-service');
+const brevisService = require('../services/brevis-service');
 const { createAgentLogger, logError } = require('../services/logger');
 const { POOL, ANALYSIS, RISK } = require('../config/constants');
 
@@ -27,6 +29,17 @@ class StatisticalAgent extends EventEmitter {
         logger.info('🔬 Starting Statistical Agent...');
 
         try {
+            // Initialize Phala TEE service
+            await phalaService.initialize(
+                blockchainService.wallet.address,
+                process.env.AGENT_PRIVATE_KEY
+            );
+            logger.info('✅ Phala TEE service initialized');
+
+            // Initialize Brevis ZK-ML service
+            await brevisService.initialize();
+            logger.info('✅ Brevis ZK-ML service initialized');
+
             // Start price fetcher
             priceFetcher.start((price) => {
                 this.cexPrice = price;
@@ -90,6 +103,7 @@ class StatisticalAgent extends EventEmitter {
 
     /**
      * Main analysis and recommendation logic
+     * Uses TEE attestation for verifiable computation
      */
     async analyzeAndRecommend() {
         try {
@@ -99,20 +113,51 @@ class StatisticalAgent extends EventEmitter {
             // Calculate all metrics
             await this.calculateMetrics();
 
-            // Generate recommendation
-            const recommendation = this.generateRecommendation();
+            // Prepare computation for TEE execution
+            const computation = {
+                type: 'FEE_RECOMMENDATION',
+                data: {
+                    priceHistory: this.metrics.priceHistory.map(p => p.price),
+                    volatility: this.metrics.volatility,
+                    spread: this.metrics.spread || 0
+                }
+            };
 
-            logger.info('Analysis complete', {
+            // Generate ZK proof of calculation
+            const zkProof = await brevisService.proveVolatilityCalculation(
+                this.metrics.priceHistory.map(p => p.price),
+                this.metrics.volatility
+            );
+
+            // Execute in TEE (simulated) and get attestation
+            const { result, attestation } = await phalaService.executeInTEE(computation);
+
+            // Log analysis results
+            logger.info('Analysis complete (Dual Verification: TEE + ZK)', {
                 cexPrice: this.cexPrice?.toFixed(2),
                 dexPrice: this.dexPrice?.toFixed(2),
-                spread: (recommendation.spread * 100).toFixed(3) + '%',
-                volatility: (recommendation.volatility * 100).toFixed(3) + '%',
-                recommendedFee: recommendation.recommendedFee,
-                feePct: (recommendation.recommendedFee / 10000).toFixed(2) + '%'
+                spread: (this.metrics.spread * 100).toFixed(3) + '%',
+                volatility: (this.metrics.volatility * 100).toFixed(3) + '%',
+                recommendedFee: result.recommendedFee,
+                feePct: result.feePct,
+                confidence: result.confidence.toFixed(2),
+                hasAttestation: !!attestation,
+                hasZKProof: !!zkProof
             });
 
-            // Emit to policy agent
-            this.emit('recommendation', recommendation);
+            // Emit recommendation WITH TEE attestation AND ZK proof
+            this.emit('recommendation', {
+                recommendedFee: result.recommendedFee,
+                volatility: this.metrics.volatility,
+                spread: this.metrics.spread,
+                liquidityDepth: this.metrics.liquidityDepth,
+                confidence: result.confidence,
+                attestation: attestation,  // Include TEE proof
+                zkProof: zkProof,          // Include ZK proof
+                timestamp: Date.now(),
+                cexPrice: this.cexPrice,
+                dexPrice: this.dexPrice
+            });
 
         } catch (error) {
             logError(logger, error, { context: 'analyzeAndRecommend' });

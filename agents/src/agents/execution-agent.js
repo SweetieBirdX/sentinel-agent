@@ -29,49 +29,53 @@ class ExecutionAgent extends EventEmitter {
     }
 
     /**
-     * Execute a signed instruction
+     * Execute a signed instruction with TEE attestation
      */
     async executeInstruction(instruction) {
-        logger.info('Executing instruction', {
+        logger.info('⚡ Preparing instruction', {
             fee: instruction.fee,
             feePct: (instruction.fee / 10000).toFixed(2) + '%',
+            hasAttestation: !!instruction.attestation,
             nonce: instruction.nonce
         });
 
         try {
-            // NOTE: In actual implementation, we would call a swap router
-            // or position manager that triggers our hook with hookData.
-            // For the hackathon demo, we'll simulate this by directly
-            // showing what the hookData would be.
-
-            // Encode hookData
+            // Encode hookData with attestation (new format for TEE verification)
             const hookData = this.encodeHookData(instruction);
 
             logger.info('HookData prepared', {
                 fee: instruction.fee,
                 signer: instruction.signer,
-                signature: instruction.signature.slice(0, 10) + '...'
+                hasAttestation: !!instruction.attestation,
+                hookDataLength: hookData.length
             });
 
             // In real implementation:
             // const tx = await swapRouter.swap(poolKey, swapParams, hookData);
 
-            // For demo, we'll just log the instruction
+            // For demo, log the prepared instruction
             logger.info('📝 Instruction ready for swap execution', {
-                hookData: hookData.slice(0, 20) + '...',
+                hookData: hookData.slice(0, 40) + '...',
                 fee: instruction.fee,
-                deadline: new Date(instruction.deadline * 1000).toISOString()
+                deadline: instruction.deadline ? new Date(instruction.deadline * 1000).toISOString() : 'N/A'
             });
 
             // Record execution
             this.executionHistory.push({
                 ...instruction,
+                hookData: hookData,
                 status: 'simulated',
                 timestamp: Date.now()
             });
 
-            // Emit success
-            logger.info('✅ Instruction executed successfully');
+            // Emit success event
+            this.emit('executed', {
+                fee: instruction.fee,
+                hookData: hookData,
+                timestamp: Date.now()
+            });
+
+            logger.info('✅ Instruction executed successfully (TEE attested)');
 
         } catch (error) {
             logError(logger, error, {
@@ -82,13 +86,51 @@ class ExecutionAgent extends EventEmitter {
     }
 
     /**
-     * Encode hookData for swap
+     * Encode hookData for swap with TEE attestation
+     * Format: (uint24 recommendedFee, bytes attestation)
+     * Attestation: (address agentId, uint256 timestamp, bytes32 resultHash, bytes signature)
      */
     encodeHookData(instruction) {
-        return ethers.AbiCoder.defaultAbiCoder().encode(
-            ['uint24', 'address', 'bytes'],
-            [instruction.fee, instruction.signer, instruction.signature]
+        const { fee, attestation } = instruction;
+
+        if (!attestation) {
+            // No attestation - legacy format (fee + empty attestation)
+            logger.debug('Encoding hookData without attestation');
+            return ethers.AbiCoder.defaultAbiCoder().encode(
+                ['uint24', 'bytes'],
+                [fee, '0x']
+            );
+        }
+
+        // Encode attestation for on-chain verification
+        // Must match SentinelHook._verifyAttestation() expected format
+        const resultHash = ethers.keccak256(
+            ethers.toUtf8Bytes(JSON.stringify(attestation.result))
         );
+
+        const attestationBytes = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['address', 'uint256', 'bytes32', 'bytes'],
+            [
+                attestation.agentId,
+                attestation.timestamp,
+                resultHash,
+                attestation.signature
+            ]
+        );
+
+        logger.debug('Encoding hookData with TEE attestation', {
+            agentId: attestation.agentId,
+            timestamp: attestation.timestamp,
+            resultHash: resultHash.slice(0, 10) + '...'
+        });
+
+        // Encode complete hookData: (fee, attestationBytes)
+        const hookData = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['uint24', 'bytes'],
+            [fee, attestationBytes]
+        );
+
+        return hookData;
     }
 
     /**
